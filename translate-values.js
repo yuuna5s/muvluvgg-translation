@@ -132,9 +132,57 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                 result[key] = await translateObjectValues(value, delayCounter);
             } else if (typeof value === 'string') {
                 // Translate the Japanese key to English and use it as the value
-                // Note: Newlines (\n) in the Japanese key will be preserved in the translation
-                const englishTranslation = await translateWithSugoi(key);
-                result[key] = englishTranslation;
+                // Preserve all special formatting (newlines, color/material tags, etc.)
+                // Only split when \n is encountered, otherwise send whole line to Sugoi
+                
+                let finalTranslation;
+                
+                // If key contains newlines, split and translate each part separately
+                if (key.includes('\n')) {
+                    const originalParts = key.split('\n');
+                    const translatedParts = [];
+                    
+                    for (let i = 0; i < originalParts.length; i++) {
+                        const part = originalParts[i];
+                        if (part.trim()) {
+                            // Send the whole part to Sugoi (including any tags like <color=...>)
+                            let translated = await translateWithSugoi(part);
+                            
+                            // Clean up unwanted HTML artifacts that Sugoi might add
+                            // But preserve color/material tags
+                            translated = translated
+                                .replace(/<br\s*\/?>/gi, '')  // Remove <br> tags
+                                .replace(/<b>/gi, '')         // Remove <b> tags
+                                .replace(/<\/b>/gi, '')       // Remove </b> tags
+                                .trim();
+                            
+                            translatedParts.push(translated);
+                        } else {
+                            // Preserve empty lines
+                            translatedParts.push('');
+                        }
+                        
+                        // Small delay between translations
+                        if (i < originalParts.length - 1) {
+                            await new Promise(resolve => setTimeout(resolve, 50));
+                        }
+                    }
+                    
+                    // Join with \n to preserve exact structure
+                    finalTranslation = translatedParts.join('\n');
+                } else {
+                    // No newlines, send whole key to Sugoi (including any tags)
+                    finalTranslation = await translateWithSugoi(key);
+                    
+                    // Clean up unwanted HTML artifacts (but preserve color/material tags)
+                    finalTranslation = finalTranslation
+                        .replace(/<br\s*\/?>/gi, '')
+                        .replace(/<b>/gi, '')
+                        .replace(/<\/b>/gi, '')
+                        .trim();
+                }
+                
+                result[key] = finalTranslation;
                 
                 // Add small delay to avoid overwhelming the server
                 delayCounter.count++;
@@ -157,40 +205,86 @@ async function processJsonFile(filePath) {
         
         // Skip if already translated
         if (data['__translated__'] === true) {
-            console.log(`⏭ Skipping ${filePath} (already translated)`);
-            return;
+            return false; // Return false to indicate file was skipped
         }
         
         console.log(`Processing ${filePath}...`);
         
+        // Remove __translated__ marker if it exists (to avoid processing issues)
+        const hasMarker = data.hasOwnProperty('__translated__');
+        if (hasMarker) {
+            delete data['__translated__'];
+        }
+        
         // Translate all values (keeping keys as Japanese)
         const translatedData = await translateObjectValues(data);
         
-        // Mark as translated
-        translatedData['__translated__'] = true;
+        // Create new object with all translated keys, then add __translated__ at the end
+        const finalData = {};
+        for (const key in translatedData) {
+            if (key !== '__translated__') {
+                finalData[key] = translatedData[key];
+            }
+        }
+        // Add marker at the end to ensure it appears last in the file
+        finalData['__translated__'] = true;
         
         // Write back to file with proper formatting
-        const output = JSON.stringify(translatedData, null, 4);
+        const output = JSON.stringify(finalData, null, 4);
         fs.writeFileSync(filePath, output, 'utf8');
         
         console.log(`✓ Completed ${filePath}`);
+        return true; // Return true to indicate file was processed
     } catch (error) {
         console.error(`Error processing ${filePath}:`, error.message);
+        return false;
     }
 }
 
-async function processDirectory(dirPath) {
+async function processDirectory(dirPath, maxFiles = null, stats = { processed: 0, skipped: 0 }) {
+    // If we've reached the limit, stop processing
+    if (maxFiles !== null && stats.processed >= maxFiles) {
+        return stats;
+    }
+    
     const files = fs.readdirSync(dirPath, { withFileTypes: true });
     
     for (const file of files) {
+        // If we've reached the limit, stop processing
+        if (maxFiles !== null && stats.processed >= maxFiles) {
+            break;
+        }
+        
         const fullPath = path.join(dirPath, file.name);
         
         if (file.isDirectory()) {
-            await processDirectory(fullPath);
+            await processDirectory(fullPath, maxFiles, stats);
         } else if (file.name.endsWith('.json') && file.name.includes('zh_Hans')) {
-            await processJsonFile(fullPath);
+            // Check if file is already translated
+            try {
+                const content = fs.readFileSync(fullPath, 'utf8');
+                const data = JSON.parse(content);
+                
+                if (data['__translated__'] === true) {
+                    stats.skipped++;
+                    continue; // Skip already translated files
+                }
+            } catch (error) {
+                // If we can't read the file, skip it
+                continue;
+            }
+            
+            // Process the file
+            const wasProcessed = await processJsonFile(fullPath);
+            if (wasProcessed) {
+                stats.processed++;
+            } else {
+                stats.skipped++;
+            }
         }
     }
+    
+    return stats;
 }
 
 // Test Sugoi connection
@@ -220,6 +314,21 @@ async function main() {
         return;
     }
     
+    // Check for command line arguments for max number of files to process
+    let maxFiles = null;
+    const args = process.argv.slice(2);
+    if (args.length >= 1) {
+        const fileCount = parseInt(args[0]);
+        if (!isNaN(fileCount) && fileCount > 0) {
+            maxFiles = fileCount;
+            console.log(`\n📋 Will process up to ${maxFiles} files (skipping already translated files)\n`);
+        } else {
+            console.error('Invalid file count. Usage: node translate-values.js [maxFiles]');
+            console.error('Example: node translate-values.js 100');
+            return;
+        }
+    }
+    
     console.log('Testing Sugoi Offline Translator connection...');
     const connected = await testSugoiConnection();
     
@@ -228,19 +337,30 @@ async function main() {
         console.error('Please make sure:');
         console.error('1. Sugoi Offline Translator server is running');
         console.error(`2. It is accessible at http://localhost:${SUGOI_PORTS.join(' or ')}`);
-        console.error('3. The API endpoint is /translate');
+        console.error('3. The API endpoint is / (root)');
         console.error('\nYou can also modify SUGOI_PORTS in the script if your server uses a different port.');
         return;
     }
     
     console.log('\n✓ Connected to Sugoi!');
     console.log('Starting translation process...');
-    console.log('This will translate Japanese keys to English and replace Chinese values...\n');
+    if (maxFiles) {
+        console.log(`This will translate up to ${maxFiles} files (skipping already translated)...\n`);
+    } else {
+        console.log('This will translate all files (skipping already translated)...\n');
+    }
     
-    await processDirectory(translationDir);
+    const stats = { processed: 0, skipped: 0 };
+    await processDirectory(translationDir, maxFiles, stats);
     
-    console.log('\n✓ All files processed!');
+    console.log('\n✓ Translation process completed!');
+    console.log(`  Processed: ${stats.processed} files`);
+    console.log(`  Skipped (already translated): ${stats.skipped} files`);
+    if (maxFiles && stats.processed >= maxFiles) {
+        console.log(`  Reached limit of ${maxFiles} files`);
+    }
 }
 
 main().catch(console.error);
+
 
