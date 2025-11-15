@@ -141,3 +141,5 @@ fix-username.js
 fix-newlines.js
 migrate-to-tracking.js
 update-translated-marker.js
+fix-all-username-patterns.js
+fix-username-pattern.js
