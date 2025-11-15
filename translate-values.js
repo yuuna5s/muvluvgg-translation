@@ -218,8 +218,8 @@ async function processJsonFile(filePath) {
         const content = fs.readFileSync(filePath, 'utf8');
         const data = JSON.parse(content);
         
-        // Skip if already translated
-        if (data['__translated__'] === true) {
+        // Skip if already translated (check both string and boolean for compatibility)
+        if (data['__translated__'] === 'true' || data['__translated__'] === true) {
             return false; // Return false to indicate file was skipped
         }
         
@@ -241,8 +241,8 @@ async function processJsonFile(filePath) {
                 finalData[key] = translatedData[key];
             }
         }
-        // Add marker at the end to ensure it appears last in the file
-        finalData['__translated__'] = true;
+        // Add marker at the end to ensure it appears last in the file (as string)
+        finalData['__translated__'] = 'true';
         
         // Write back to file with proper formatting
         const output = JSON.stringify(finalData, null, 4);
@@ -280,7 +280,7 @@ async function processDirectory(dirPath, maxFiles = null, stats = { processed: 0
                 const content = fs.readFileSync(fullPath, 'utf8');
                 const data = JSON.parse(content);
                 
-                if (data['__translated__'] === true) {
+                if (data['__translated__'] === 'true' || data['__translated__'] === true) {
                     stats.skipped++;
                     continue; // Skip already translated files
                 }
