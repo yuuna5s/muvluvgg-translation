@@ -155,10 +155,19 @@ async function processJsonFile(filePath) {
         const content = fs.readFileSync(filePath, 'utf8');
         const data = JSON.parse(content);
         
+        // Skip if already translated
+        if (data['__translated__'] === true) {
+            console.log(`⏭ Skipping ${filePath} (already translated)`);
+            return;
+        }
+        
         console.log(`Processing ${filePath}...`);
         
         // Translate all values (keeping keys as Japanese)
         const translatedData = await translateObjectValues(data);
+        
+        // Mark as translated
+        translatedData['__translated__'] = true;
         
         // Write back to file with proper formatting
         const output = JSON.stringify(translatedData, null, 4);
