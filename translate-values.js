@@ -213,14 +213,60 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
     return obj;
 }
 
-async function processJsonFile(filePath) {
+// Tracking file to store list of translated files
+const TRACKING_FILE = path.join(__dirname, 'translated-files.json');
+
+// Load list of translated files
+function loadTranslatedFiles() {
+    try {
+        if (fs.existsSync(TRACKING_FILE)) {
+            const content = fs.readFileSync(TRACKING_FILE, 'utf8');
+            return new Set(JSON.parse(content));
+        }
+    } catch (error) {
+        console.warn('Could not load tracking file:', error.message);
+    }
+    return new Set();
+}
+
+// Save list of translated files
+function saveTranslatedFiles(translatedFiles) {
+    try {
+        const fileArray = Array.from(translatedFiles);
+        fs.writeFileSync(TRACKING_FILE, JSON.stringify(fileArray, null, 2), 'utf8');
+    } catch (error) {
+        console.error('Could not save tracking file:', error.message);
+    }
+}
+
+// Check if file is already translated
+function isFileTranslated(filePath, translatedFiles) {
+    // Normalize path for cross-platform compatibility
+    const normalizedPath = path.relative(__dirname, filePath).replace(/\\/g, '/');
+    return translatedFiles.has(normalizedPath);
+}
+
+// Mark file as translated
+function markFileAsTranslated(filePath, translatedFiles) {
+    const normalizedPath = path.relative(__dirname, filePath).replace(/\\/g, '/');
+    translatedFiles.add(normalizedPath);
+}
+
+async function processJsonFile(filePath, translatedFiles) {
     try {
         const content = fs.readFileSync(filePath, 'utf8');
         const data = JSON.parse(content);
         
-        // Skip if already translated (check both string and boolean for compatibility)
-        if (data['__translated__'] === 'true' || data['__translated__'] === true) {
+        // Skip if already translated (check tracking file)
+        if (isFileTranslated(filePath, translatedFiles)) {
             return false; // Return false to indicate file was skipped
+        }
+        
+        // Also check for old __translated__ marker for backward compatibility
+        if (data['__translated__'] === 'true' || data['__translated__'] === true) {
+            // Mark in tracking file and skip
+            markFileAsTranslated(filePath, translatedFiles);
+            return false;
         }
         
         console.log(`Processing ${filePath}...`);
@@ -234,19 +280,12 @@ async function processJsonFile(filePath) {
         // Translate all values (keeping keys as Japanese)
         const translatedData = await translateObjectValues(data);
         
-        // Create new object with all translated keys, then add __translated__ at the end
-        const finalData = {};
-        for (const key in translatedData) {
-            if (key !== '__translated__') {
-                finalData[key] = translatedData[key];
-            }
-        }
-        // Add marker at the end to ensure it appears last in the file (as string)
-        finalData['__translated__'] = 'true';
-        
-        // Write back to file with proper formatting
-        const output = JSON.stringify(finalData, null, 4);
+        // Write back to file with proper formatting (no marker added)
+        const output = JSON.stringify(translatedData, null, 4);
         fs.writeFileSync(filePath, output, 'utf8');
+        
+        // Mark as translated in tracking file
+        markFileAsTranslated(filePath, translatedFiles);
         
         console.log(`✓ Completed ${filePath}`);
         return true; // Return true to indicate file was processed
@@ -256,7 +295,7 @@ async function processJsonFile(filePath) {
     }
 }
 
-async function processDirectory(dirPath, maxFiles = null, stats = { processed: 0, skipped: 0 }) {
+async function processDirectory(dirPath, maxFiles = null, stats = { processed: 0, skipped: 0 }, translatedFiles) {
     // If we've reached the limit, stop processing
     if (maxFiles !== null && stats.processed >= maxFiles) {
         return stats;
@@ -273,16 +312,24 @@ async function processDirectory(dirPath, maxFiles = null, stats = { processed: 0
         const fullPath = path.join(dirPath, file.name);
         
         if (file.isDirectory()) {
-            await processDirectory(fullPath, maxFiles, stats);
+            await processDirectory(fullPath, maxFiles, stats, translatedFiles);
         } else if (file.name.endsWith('.json') && file.name.includes('zh_Hans')) {
             // Check if file is already translated
+            if (isFileTranslated(fullPath, translatedFiles)) {
+                stats.skipped++;
+                continue; // Skip already translated files
+            }
+            
+            // Also check for old __translated__ marker for backward compatibility
             try {
                 const content = fs.readFileSync(fullPath, 'utf8');
                 const data = JSON.parse(content);
                 
                 if (data['__translated__'] === 'true' || data['__translated__'] === true) {
+                    // Mark in tracking file and skip
+                    markFileAsTranslated(fullPath, translatedFiles);
                     stats.skipped++;
-                    continue; // Skip already translated files
+                    continue;
                 }
             } catch (error) {
                 // If we can't read the file, skip it
@@ -290,9 +337,13 @@ async function processDirectory(dirPath, maxFiles = null, stats = { processed: 0
             }
             
             // Process the file
-            const wasProcessed = await processJsonFile(fullPath);
+            const wasProcessed = await processJsonFile(fullPath, translatedFiles);
             if (wasProcessed) {
                 stats.processed++;
+                // Save tracking file periodically (every 10 files)
+                if (stats.processed % 10 === 0) {
+                    saveTranslatedFiles(translatedFiles);
+                }
             } else {
                 stats.skipped++;
             }
@@ -365,8 +416,15 @@ async function main() {
         console.log('This will translate all files (skipping already translated)...\n');
     }
     
+    // Load tracking file
+    const translatedFiles = loadTranslatedFiles();
+    console.log(`Found ${translatedFiles.size} files already marked as translated in tracking file.\n`);
+    
     const stats = { processed: 0, skipped: 0 };
-    await processDirectory(translationDir, maxFiles, stats);
+    await processDirectory(translationDir, maxFiles, stats, translatedFiles);
+    
+    // Save tracking file at the end
+    saveTranslatedFiles(translatedFiles);
     
     console.log('\n✓ Translation process completed!');
     console.log(`  Processed: ${stats.processed} files`);
@@ -374,6 +432,7 @@ async function main() {
     if (maxFiles && stats.processed >= maxFiles) {
         console.log(`  Reached limit of ${maxFiles} files`);
     }
+    console.log(`\nTracking file: ${TRACKING_FILE} (can be committed to git)`);
 }
 
 main().catch(console.error);
