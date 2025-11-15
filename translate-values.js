@@ -134,14 +134,16 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                 // Translate the Japanese key to English and use it as the value
                 // Preserve all special formatting (newlines, color/material tags, etc.)
                 // Only split when \n is encountered, otherwise send whole line to Sugoi
-                // Preserve %usernameusernameuserna% pattern
+                // Preserve %usernameusernameuserna% pattern and all %user...na% variations
                 
                 let finalTranslation;
                 
-                // Preserve %usernameusernameuserna% pattern by replacing with placeholder
-                const usernamePattern = /%usernameusernameuserna%/gi;
-                const usernamePlaceholder = '__USERNAME_PLACEHOLDER__';
-                const hasUsername = usernamePattern.test(key);
+                // Preserve ALL username patterns (%user...na% variations) by replacing with placeholder
+                // This protects: %usernameusernameuserna%, %user...na%, etc.
+                const usernamePattern = /%user[^%]*na%/gi;
+                const usernamePlaceholder = '__USERNAME_PLACEHOLDER_XYZ123__';
+                const usernameMatches = key.match(usernamePattern);
+                const hasUsername = usernameMatches && usernameMatches.length > 0;
                 const keyWithPlaceholder = key.replace(usernamePattern, usernamePlaceholder);
                 
                 // If key contains newlines, split and translate each part separately
@@ -163,8 +165,9 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                                 .replace(/<\/b>/gi, '')       // Remove </b> tags
                                 .trim();
                             
-                            // Restore username placeholder
-                            translated = translated.replace(usernamePlaceholder, '%usernameusernameuserna%');
+                            // Restore username placeholder - replace with correct pattern
+                            // Use global replace to handle multiple occurrences
+                            translated = translated.replace(new RegExp(usernamePlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), '%usernameusernameuserna%');
                             
                             translatedParts.push(translated);
                         } else {
@@ -180,6 +183,10 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                     
                     // Join with \n to preserve exact structure
                     finalTranslation = translatedParts.join('\n');
+                    
+                    // Also protect against any %user...na% patterns that might have been introduced by translation
+                    // This ensures we catch any variations that might have been created
+                    finalTranslation = finalTranslation.replace(/%user[^%]*na%/gi, '%usernameusernameuserna%');
                 } else {
                     // No newlines, send whole key to Sugoi (including any tags)
                     finalTranslation = await translateWithSugoi(keyWithPlaceholder);
@@ -191,10 +198,15 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                         .replace(/<\/b>/gi, '')
                         .trim();
                     
-                    // Restore username placeholder
+                    // Restore username placeholder - replace with correct pattern
+                    // Use global replace to handle multiple occurrences
                     if (hasUsername) {
-                        finalTranslation = finalTranslation.replace(usernamePlaceholder, '%usernameusernameuserna%');
+                        finalTranslation = finalTranslation.replace(new RegExp(usernamePlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), '%usernameusernameuserna%');
                     }
+                    
+                    // Also protect against any %user...na% patterns that might have been introduced by translation
+                    // This ensures we catch any variations that might have been created
+                    finalTranslation = finalTranslation.replace(/%user[^%]*na%/gi, '%usernameusernameuserna%');
                 }
                 
                 result[key] = finalTranslation;
