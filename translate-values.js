@@ -189,12 +189,11 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                     finalTranslation = finalTranslation.replace(/%user[^%]*na%/gi, '%usernameusernameuserna%');
                     
                     // Normalize curly quotes/apostrophes to straight ones
+                    // Replace all curly apostrophe variations (U+2019, U+2018, U+201B, U+201A)
                     finalTranslation = finalTranslation
-                        .replace(/'/g, "'")  // Replace curly apostrophes
-                        .replace(/'/g, "'")  // Replace left single quote
-                        .replace(/'/g, "'")  // Replace right single quote
-                        .replace(/"/g, '"')  // Replace left double quote
-                        .replace(/"/g, '"'); // Replace right double quote
+                        .replace(/[\u2019\u2018\u201B\u201A]/g, "'")  // Replace all curly apostrophe variations
+                        .replace(/[\u201C\u201E\u201F]/g, '"')   // Replace left double quotes
+                        .replace(/[\u201D\u201C]/g, '"');    // Replace right double quotes
                 } else {
                     // No newlines, send whole key to Sugoi (including any tags)
                     finalTranslation = await translateWithSugoi(keyWithPlaceholder);
@@ -217,12 +216,11 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                     finalTranslation = finalTranslation.replace(/%user[^%]*na%/gi, '%usernameusernameuserna%');
                     
                     // Normalize curly quotes/apostrophes to straight ones
+                    // Replace all curly apostrophe variations (U+2019, U+2018, U+201B, U+201A)
                     finalTranslation = finalTranslation
-                        .replace(/'/g, "'")  // Replace curly apostrophes
-                        .replace(/'/g, "'")  // Replace left single quote
-                        .replace(/'/g, "'")  // Replace right single quote
-                        .replace(/"/g, '"')  // Replace left double quote
-                        .replace(/"/g, '"'); // Replace right double quote
+                        .replace(/[\u2019\u2018\u201B\u201A]/g, "'")  // Replace all curly apostrophe variations
+                        .replace(/[\u201C\u201E\u201F]/g, '"')   // Replace left double quotes
+                        .replace(/[\u201D\u201C]/g, '"');    // Replace right double quotes
                 }
                 
                 result[key] = finalTranslation;
