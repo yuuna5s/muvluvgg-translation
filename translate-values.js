@@ -187,6 +187,14 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                     // Also protect against any %user...na% patterns that might have been introduced by translation
                     // This ensures we catch any variations that might have been created
                     finalTranslation = finalTranslation.replace(/%user[^%]*na%/gi, '%usernameusernameuserna%');
+                    
+                    // Normalize curly quotes/apostrophes to straight ones
+                    finalTranslation = finalTranslation
+                        .replace(/'/g, "'")  // Replace curly apostrophes
+                        .replace(/'/g, "'")  // Replace left single quote
+                        .replace(/'/g, "'")  // Replace right single quote
+                        .replace(/"/g, '"')  // Replace left double quote
+                        .replace(/"/g, '"'); // Replace right double quote
                 } else {
                     // No newlines, send whole key to Sugoi (including any tags)
                     finalTranslation = await translateWithSugoi(keyWithPlaceholder);
@@ -207,6 +215,14 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                     // Also protect against any %user...na% patterns that might have been introduced by translation
                     // This ensures we catch any variations that might have been created
                     finalTranslation = finalTranslation.replace(/%user[^%]*na%/gi, '%usernameusernameuserna%');
+                    
+                    // Normalize curly quotes/apostrophes to straight ones
+                    finalTranslation = finalTranslation
+                        .replace(/'/g, "'")  // Replace curly apostrophes
+                        .replace(/'/g, "'")  // Replace left single quote
+                        .replace(/'/g, "'")  // Replace right single quote
+                        .replace(/"/g, '"')  // Replace left double quote
+                        .replace(/"/g, '"'); // Replace right double quote
                 }
                 
                 result[key] = finalTranslation;
