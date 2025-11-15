@@ -134,12 +134,19 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                 // Translate the Japanese key to English and use it as the value
                 // Preserve all special formatting (newlines, color/material tags, etc.)
                 // Only split when \n is encountered, otherwise send whole line to Sugoi
+                // Preserve %usernameusernameuserna% pattern
                 
                 let finalTranslation;
                 
+                // Preserve %usernameusernameuserna% pattern by replacing with placeholder
+                const usernamePattern = /%usernameusernameuserna%/gi;
+                const usernamePlaceholder = '__USERNAME_PLACEHOLDER__';
+                const hasUsername = usernamePattern.test(key);
+                const keyWithPlaceholder = key.replace(usernamePattern, usernamePlaceholder);
+                
                 // If key contains newlines, split and translate each part separately
-                if (key.includes('\n')) {
-                    const originalParts = key.split('\n');
+                if (keyWithPlaceholder.includes('\n')) {
+                    const originalParts = keyWithPlaceholder.split('\n');
                     const translatedParts = [];
                     
                     for (let i = 0; i < originalParts.length; i++) {
@@ -155,6 +162,9 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                                 .replace(/<b>/gi, '')         // Remove <b> tags
                                 .replace(/<\/b>/gi, '')       // Remove </b> tags
                                 .trim();
+                            
+                            // Restore username placeholder
+                            translated = translated.replace(usernamePlaceholder, '%usernameusernameuserna%');
                             
                             translatedParts.push(translated);
                         } else {
@@ -172,7 +182,7 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                     finalTranslation = translatedParts.join('\n');
                 } else {
                     // No newlines, send whole key to Sugoi (including any tags)
-                    finalTranslation = await translateWithSugoi(key);
+                    finalTranslation = await translateWithSugoi(keyWithPlaceholder);
                     
                     // Clean up unwanted HTML artifacts (but preserve color/material tags)
                     finalTranslation = finalTranslation
@@ -180,6 +190,11 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                         .replace(/<b>/gi, '')
                         .replace(/<\/b>/gi, '')
                         .trim();
+                    
+                    // Restore username placeholder
+                    if (hasUsername) {
+                        finalTranslation = finalTranslation.replace(usernamePlaceholder, '%usernameusernameuserna%');
+                    }
                 }
                 
                 result[key] = finalTranslation;
