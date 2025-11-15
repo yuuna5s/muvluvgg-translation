@@ -1,2 +1,2 @@
 # muvluvgg-translation
-Simple Chinese translation for Muvluv Girls Garden
+A forked of the Chinese MuvLuv GG translation, replace all the Chinese translated content with English using MTL (SugoiOfflineTranslator)
