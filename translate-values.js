@@ -6,6 +6,172 @@ const http = require('http');
 const SUGOI_PORTS = [14366];
 const SUGOI_PATH = '/';
 
+// Extract and preserve fullwidth bracket tags 〈...〉
+// Pattern: 〈[optional prefix like r=]Japanese text〉
+// We keep the tag content in Japanese, just preserve the tag structure and position
+// Use English placeholders that Sugoi won't translate
+function extractAndPreserveTags(text) {
+    // Match fullwidth bracket tags: 〈...〉 (U+3008 and U+3009)
+    const tagPattern = /〈([^〉]+)〉/g;
+    let tagIndex = 0;
+    const tagMap = new Map();
+    
+    // Find all tags first
+    const matches = [];
+    let match;
+    
+    // Reset regex lastIndex to ensure we find all matches
+    tagPattern.lastIndex = 0;
+    while ((match = tagPattern.exec(text)) !== null) {
+        matches.push({
+            fullTag: match[0], // e.g., 〈r=メインシャフト〉 or 〈プライマル・ベルト〉
+            index: match.index
+        });
+    }
+    
+    // Process tags in reverse order to preserve indices when replacing
+    let processedText = text;
+    for (let i = matches.length - 1; i >= 0; i--) {
+        const match = matches[i];
+        const fullTag = match.fullTag;
+        
+        // Create a unique placeholder with English text that won't be translated
+        // Use format: ___TAG0___, ___TAG1___, etc.
+        const placeholder = `___TAG${tagIndex}___`;
+        // Store the original tag to restore later
+        tagMap.set(placeholder, fullTag);
+        
+        // Replace the original tag with placeholder (working backwards preserves indices)
+        processedText = processedText.substring(0, match.index) + 
+                       placeholder + 
+                       processedText.substring(match.index + fullTag.length);
+        tagIndex++;
+    }
+    
+    return { processedText, tagMap };
+}
+
+// Restore tags after translation
+// Handle variations where Sugoi might slightly modify the placeholder
+// ONLY handles fullwidth bracket tag placeholders (___TAG0___, etc.)
+// Does NOT interfere with username placeholders or HTML tags (<color>, </material>, etc.)
+function restoreTags(text, tagMap) {
+    let restored = text;
+    // Sort placeholders by index (highest first) to avoid conflicts when replacing
+    const sortedEntries = Array.from(tagMap.entries()).sort((a, b) => {
+        const aMatch = a[0].match(/TAG(\d+)/);
+        const bMatch = b[0].match(/TAG(\d+)/);
+        const aIndex = aMatch ? parseInt(aMatch[1], 10) : 0;
+        const bIndex = bMatch ? parseInt(bMatch[1], 10) : 0;
+        return bIndex - aIndex; // Highest first
+    });
+    
+    for (const [placeholder, tag] of sortedEntries) {
+        // Extract the tag index - must be a TAG placeholder, not username
+        const indexMatch = placeholder.match(/^___TAG(\d+)___$/);
+        if (indexMatch) {
+            const index = indexMatch[1];
+            
+            // Try exact match first (most reliable)
+            const exactPattern = new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+            if (exactPattern.test(restored)) {
+                // Add spacing around the tag when replacing exact matches
+                restored = restored.replace(exactPattern, (match, offset) => {
+                    const beforeIndex = offset - 1;
+                    const afterIndex = offset + match.length;
+                    const needsSpaceBefore = beforeIndex >= 0 && 
+                        /[a-zA-Z0-9%]/.test(restored[beforeIndex]) && 
+                        !/\s/.test(restored[beforeIndex]);
+                    const needsSpaceAfter = afterIndex < restored.length && 
+                        /[a-zA-Z0-9%]/.test(restored[afterIndex]) && 
+                        !/\s/.test(restored[afterIndex]);
+                    
+                    let result = tag;
+                    if (needsSpaceBefore) result = ' ' + result;
+                    if (needsSpaceAfter) result = result + ' ';
+                    return result;
+                });
+                continue;
+            }
+            
+            // Try flexible pattern to match variations like:
+            // ___TAG0___, __TAG0___, _TAG0___, TAG0___, _tag0___, etc.
+            // But make sure it doesn't match:
+            // - Username placeholder patterns (USERNAME_PLACEHOLDER)
+            // - HTML tags (<color>, </material>, etc.)
+            // Match only standalone TAG placeholders surrounded by word boundaries or non-alphanumeric chars
+            const flexiblePattern = new RegExp(
+                `(?:^|[^_a-zA-Z0-9%])_+[Tt][Aa][Gg]${index}_+(?![a-zA-Z0-9%<])`,
+                'g'
+            );
+            
+            // Find all matches and replace (working backwards to preserve indices)
+            const matches = [];
+            let match;
+            while ((match = flexiblePattern.exec(restored)) !== null) {
+                const matchedText = match[0];
+                const startIndex = match.index;
+                const beforeChar = match[1] || '';
+                
+                // Check context around the match to ensure it's not part of:
+                // 1. USERNAME_PLACEHOLDER
+                // 2. HTML tags like <color> or </material>
+                const contextStart = Math.max(0, startIndex - 30);
+                const contextEnd = Math.min(restored.length, startIndex + matchedText.length + 30);
+                const context = restored.substring(contextStart, contextEnd);
+                
+                // Skip if it's part of USERNAME_PLACEHOLDER
+                if (context.includes('USERNAME_PLACEHOLDER')) {
+                    continue;
+                }
+                
+                // Skip if it's part of HTML tags (<color>, </material>, etc.)
+                if (/<[^>]*(?:color|material)/i.test(context)) {
+                    continue;
+                }
+                
+                // Valid match - store for replacement
+                matches.push({
+                    index: startIndex,
+                    length: matchedText.length,
+                    beforeChar: beforeChar,
+                    fullMatch: matchedText
+                });
+            }
+            
+            // Replace matches in reverse order to preserve indices
+            for (let i = matches.length - 1; i >= 0; i--) {
+                const m = matches[i];
+                // Add spacing around the tag for readability (tags are usually nouns)
+                // Check if we need to add space before the tag
+                const beforeIndex = m.index - 1;
+                const needsSpaceBefore = beforeIndex >= 0 && 
+                    /[a-zA-Z0-9%]/.test(restored[beforeIndex]) && 
+                    !/\s/.test(restored[beforeIndex]);
+                
+                // Check if we need to add space after the tag
+                const afterIndex = m.index + m.length;
+                const needsSpaceAfter = afterIndex < restored.length && 
+                    /[a-zA-Z0-9%]/.test(restored[afterIndex]) && 
+                    !/\s/.test(restored[afterIndex]);
+                
+                let replacement = m.beforeChar;
+                if (needsSpaceBefore) replacement += ' ';
+                replacement += tag;
+                if (needsSpaceAfter) replacement += ' ';
+                
+                restored = restored.substring(0, m.index) + replacement + restored.substring(m.index + m.length);
+            }
+        } else {
+            // Fallback: exact match only (shouldn't happen with our placeholder format)
+            const exactPattern = new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+            restored = restored.replace(exactPattern, tag);
+        }
+    }
+    
+    return restored;
+}
+
 // Translate Japanese to English using Sugoi Offline Translator
 function translateWithSugoi(japaneseText, port = null) {
     return new Promise((resolve, reject) => {
@@ -138,17 +304,22 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                 
                 let finalTranslation;
                 
-                // Preserve ALL username patterns (%user...na% variations) by replacing with placeholder
+                // Preserve ALL username patterns (%user...na% variations) by replacing with real name
+                // Using "Xeonis" as a placeholder name - Sugoi translates it more naturally
                 // This protects: %usernameusernameuserna%, %user...na%, etc.
                 const usernamePattern = /%user[^%]*na%/gi;
-                const usernamePlaceholder = '__USERNAME_PLACEHOLDER_XYZ123__';
+                const realNamePlaceholder = 'Xeonis';
                 const usernameMatches = key.match(usernamePattern);
                 const hasUsername = usernameMatches && usernameMatches.length > 0;
-                const keyWithPlaceholder = key.replace(usernamePattern, usernamePlaceholder);
+                const keyWithPlaceholder = key.replace(usernamePattern, realNamePlaceholder);
+                
+                // Extract fullwidth bracket tags 〈...〉 before processing
+                // Keep tag content in Japanese, just preserve structure and position
+                const { processedText: textWithTagPlaceholders, tagMap } = extractAndPreserveTags(keyWithPlaceholder);
                 
                 // If key contains newlines, split and translate each part separately
-                if (keyWithPlaceholder.includes('\n')) {
-                    const originalParts = keyWithPlaceholder.split('\n');
+                if (textWithTagPlaceholders.includes('\n')) {
+                    const originalParts = textWithTagPlaceholders.split('\n');
                     const translatedParts = [];
                     
                     for (let i = 0; i < originalParts.length; i++) {
@@ -165,9 +336,26 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                                 .replace(/<\/b>/gi, '')       // Remove </b> tags
                                 .trim();
                             
-                            // Restore username placeholder - replace with correct pattern
-                            // Use global replace to handle multiple occurrences
-                            translated = translated.replace(new RegExp(usernamePlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), '%usernameusernameuserna%');
+                            // Restore real name placeholder - replace with correct pattern
+                            // Handle variations that Sugoi might introduce (Xeonis, Xeois, Xeons, Xeonys, etc.)
+                            const nameVariations = [
+                                'Xeonis', 'xeonis', 'XEONIS',
+                                'Xeois', 'xeois', 'XEOIS',
+                                'Xeons', 'xeons', 'XEONS',
+                                'Xeonys', 'xeonys', 'XEONYS',
+                                'Xeony', 'xeony', 'XEONY',
+                                'Xeoni', 'xeoni', 'XEONI',
+                                'Xeonyis', 'xeonyis', 'XEONYIS',
+                                'Xeonsis', 'xeonsis', 'XEONSIS',
+                                'Xeon', 'xeon', 'XEON'
+                            ];
+                            
+                            for (const name of nameVariations) {
+                                translated = translated.replace(new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '%usernameusernameuserna%');
+                            }
+                            
+                            // Also catch any old technical placeholders
+                            translated = translated.replace(/_+USERNAME[_\s-]*PLACEHOLDER[_\s-]*XYZ123[_\s-]*/gi, '%usernameusernameuserna%');
                             
                             translatedParts.push(translated);
                         } else {
@@ -184,9 +372,55 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                     // Join with \n to preserve exact structure
                     finalTranslation = translatedParts.join('\n');
                     
-                    // Also protect against any %user...na% patterns that might have been introduced by translation
-                    // This ensures we catch any variations that might have been created
+                    // Restore real name placeholder FIRST (before tag restoration)
+                    // Handle variations that Sugoi might introduce (Xeonis, Xeois, Xeons, Xeonys, etc.)
+                    const nameVariations = [
+                        'Xeonis', 'xeonis', 'XEONIS',
+                        'Xeois', 'xeois', 'XEOIS',
+                        'Xeons', 'xeons', 'XEONS',
+                        'Xeonys', 'xeonys', 'XEONYS',
+                        'Xeony', 'xeony', 'XEONY',
+                        'Xeoni', 'xeoni', 'XEONI',
+                        'Xeonyis', 'xeonyis', 'XEONYIS',
+                        'Xeonsis', 'xeonsis', 'XEONSIS',
+                        'Xeon', 'xeon', 'XEON'
+                    ];
+                    
+                    for (const name of nameVariations) {
+                        finalTranslation = finalTranslation.replace(new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '%usernameusernameuserna%');
+                    }
+                    
+                    // Also catch any old technical placeholders (with various spacing/formatting)
+                    finalTranslation = finalTranslation.replace(/_+USERNAME[_\s-]*PLACEHOLDER[_\s-]*XYZ123[_\s-]*/gi, '%usernameusernameuserna%');
+                    
+                    // Then restore fullwidth bracket tags (only 〈...〉 tags)
+                    finalTranslation = restoreTags(finalTranslation, tagMap);
+                    
+                    // Restore name variations again after tag restoration
+                    for (const name of nameVariations) {
+                        finalTranslation = finalTranslation.replace(new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '%usernameusernameuserna%');
+                    }
+                    
+                    // Final pass for any username variations that might have been introduced by translation
                     finalTranslation = finalTranslation.replace(/%user[^%]*na%/gi, '%usernameusernameuserna%');
+                    
+                    // Add proper spacing around username pattern for readability
+                    // Only match the exact pattern %usernameusernameuserna% (not percentages like 100%)
+                    // Handle honorifics like "san", "kun", etc. with hyphen
+                    // First, handle honorifics that might be attached
+                    const honorificPattern = /(%usernameusernameuserna%)\s*([a-z]+)\b/gi;
+                    finalTranslation = finalTranslation.replace(honorificPattern, (match, username, honorific) => {
+                        const commonHonorifics = ['san', 'kun', 'chan', 'sama', 'senpai', 'sensei', 'dono'];
+                        if (commonHonorifics.includes(honorific.toLowerCase())) {
+                            return `${username}-${honorific}`;
+                        }
+                        return match;
+                    });
+                    // Add spaces before if preceded by alphanumeric, add spaces after if followed by alphanumeric
+                    // But don't add space if it's already followed by a hyphen (for honorifics)
+                    finalTranslation = finalTranslation.replace(/([a-zA-Z0-9])(%usernameusernameuserna%)([a-zA-Z0-9])/g, '$1 $2 $3');
+                    finalTranslation = finalTranslation.replace(/([a-zA-Z0-9])(%usernameusernameuserna%)(?!-)/g, '$1 $2');
+                    finalTranslation = finalTranslation.replace(/(?<!-)(%usernameusernameuserna%)([a-zA-Z0-9])/g, '$1 $2');
                     
                     // Normalize curly quotes/apostrophes to straight ones
                     // Replace all curly apostrophe variations (U+2019, U+2018, U+201B, U+201A)
@@ -196,7 +430,7 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                         .replace(/[\u201D\u201C]/g, '"');    // Replace right double quotes
                 } else {
                     // No newlines, send whole key to Sugoi (including any tags)
-                    finalTranslation = await translateWithSugoi(keyWithPlaceholder);
+                    finalTranslation = await translateWithSugoi(textWithTagPlaceholders);
                     
                     // Clean up unwanted HTML artifacts (but preserve color/material tags)
                     finalTranslation = finalTranslation
@@ -205,15 +439,65 @@ async function translateObjectValues(obj, delayCounter = { count: 0 }) {
                         .replace(/<\/b>/gi, '')
                         .trim();
                     
-                    // Restore username placeholder - replace with correct pattern
-                    // Use global replace to handle multiple occurrences
+                    // Restore real name placeholder FIRST (before tag restoration)
                     if (hasUsername) {
-                        finalTranslation = finalTranslation.replace(new RegExp(usernamePlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), '%usernameusernameuserna%');
+                        // Handle variations that Sugoi might introduce (Xeonis, Xeois, Xeons, Xeonys, etc.)
+                        const nameVariations = [
+                            'Xeonis', 'xeonis', 'XEONIS',
+                            'Xeois', 'xeois', 'XEOIS',
+                            'Xeons', 'xeons', 'XEONS',
+                            'Xeonys', 'xeonys', 'XEONYS',
+                            'Xeony', 'xeony', 'XEONY',
+                            'Xeoni', 'xeoni', 'XEONI',
+                            'Xeonyis', 'xeonyis', 'XEONYIS',
+                            'Xeonsis', 'xeonsis', 'XEONSIS',
+                            'Xeon', 'xeon', 'XEON'
+                        ];
+                        
+                        for (const name of nameVariations) {
+                            finalTranslation = finalTranslation.replace(new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '%usernameusernameuserna%');
+                        }
                     }
                     
-                    // Also protect against any %user...na% patterns that might have been introduced by translation
-                    // This ensures we catch any variations that might have been created
+                    // Also catch any old technical placeholders (with various spacing/formatting)
+                    finalTranslation = finalTranslation.replace(/_+USERNAME[_\s-]*PLACEHOLDER[_\s-]*XYZ123[_\s-]*/gi, '%usernameusernameuserna%');
+                    
+                    // Then restore fullwidth bracket tags (only 〈...〉 tags)
+                    finalTranslation = restoreTags(finalTranslation, tagMap);
+                    
+                    // Restore name variations again after tag restoration
+                    if (hasUsername) {
+                        const nameVariations = [
+                            'Xeonis', 'xeonis', 'XEONIS',
+                            'Xeois', 'xeois', 'XEOIS',
+                            'Xeons', 'xeons', 'XEONS'
+                        ];
+                        
+                        for (const name of nameVariations) {
+                            finalTranslation = finalTranslation.replace(new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '%usernameusernameuserna%');
+                        }
+                    }
+                    
+                    // Final pass for any username variations that might have been introduced by translation
                     finalTranslation = finalTranslation.replace(/%user[^%]*na%/gi, '%usernameusernameuserna%');
+                    
+                    // Add proper spacing around username pattern for readability
+                    // Only match the exact pattern %usernameusernameuserna% (not percentages like 100%)
+                    // Handle honorifics like "san", "kun", etc. with hyphen
+                    // First, handle honorifics that might be attached
+                    const honorificPattern = /(%usernameusernameuserna%)\s*([a-z]+)\b/gi;
+                    finalTranslation = finalTranslation.replace(honorificPattern, (match, username, honorific) => {
+                        const commonHonorifics = ['san', 'kun', 'chan', 'sama', 'senpai', 'sensei', 'dono'];
+                        if (commonHonorifics.includes(honorific.toLowerCase())) {
+                            return `${username}-${honorific}`;
+                        }
+                        return match;
+                    });
+                    // Add spaces before if preceded by alphanumeric, add spaces after if followed by alphanumeric
+                    // But don't add space if it's already followed by a hyphen (for honorifics)
+                    finalTranslation = finalTranslation.replace(/([a-zA-Z0-9])(%usernameusernameuserna%)([a-zA-Z0-9])/g, '$1 $2 $3');
+                    finalTranslation = finalTranslation.replace(/([a-zA-Z0-9])(%usernameusernameuserna%)(?!-)/g, '$1 $2');
+                    finalTranslation = finalTranslation.replace(/(?<!-)(%usernameusernameuserna%)([a-zA-Z0-9])/g, '$1 $2');
                     
                     // Normalize curly quotes/apostrophes to straight ones
                     // Replace all curly apostrophe variations (U+2019, U+2018, U+201B, U+201A)

@@ -144,3 +144,13 @@ update-translated-marker.js
 fix-all-username-patterns.js
 fix-username-pattern.js
 fix-apostrophes.js
+fix-remaining-tag-placeholders.js
+fix-tag-spacing-and-restore.js
+fix-username-comma-and-spacing.js
+fix-username-placeholders-final.js
+fix-username-placeholders.js
+fix-username-spacing.js
+retranslate-files-with-tags.js
+retranslate-username-lines.js
+fix-missed-username-patterns.js
+test-username-translation-methods.js

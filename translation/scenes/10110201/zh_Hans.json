@@ -75,7 +75,7 @@
     "ペースを変えないなら、その分の余裕を探索に回そう。\nタツミヤ鉱やエリアを見つけるのもパイロットの本分だしな。": "If I don't change my pace, I'll send that much leeway to explore.\nFinding Tatsumiya Ore and the area is part of a pilot's job description.",
     "あー、なるほど。確かにそれが一番楽に成果を稼げるね。\nオッケー、ルート選定のときにはそれを念頭におくね。": "Ah, I see. That would certainly be the easiest way to earn results.\nOkay, keep that in mind when selecting a route.",
     "ただし、悪目立ちはしないようにな。": "But don't stand out too much.",
-    "%usernameusernameuserna%くんは、\nやっぱり炎上を警戒してる感じかな？": "_USERNAME_PLACEHOLDER_XYZ123_KUN\nI guess it really does feel like she's on guard against the flames?",
+    "%usernameusernameuserna%くんは、\nやっぱり炎上を警戒してる感じかな？": "%usernameusernameuserna%-kun...\nI guess it really does feel like she's on guard against the flames?",
     "まあな……俺も知らん奴らから悪口言われてたらしくてな。\nあれは面倒くさいし、見ても良いことがない。": "Yeah... It seems like some strangers were badmouthing me, too.\nThat was a pain in the ass, and there was nothing good about it.",
     "わー。ご愁傷様。": "Wow. My condolences.",
     "こちら本部。先ほどトリニティ・ジュエルがＢ地点を通過。\n視聴者数はさらに増えて１．５倍です。": "This is HQ. Trinity Jewel just passed point B.\nThe number of viewers increases even further by 1.5 times.",
@@ -93,6 +93,6 @@
     "え？　あ、そ、そうだね。\n一度小休止を入れようか。": "Huh? Oh, y-you're right.\nLet's take a short break.",
     "了解。じゃあ私とシエナで周辺を警戒しとくから、\nみんなは先に休んでて。": "Understood. Siena and I will keep an eye on the area, then.\nYou guys go ahead and rest.",
     "…………はぁ。": "............haa.",
-    "……%usernameusernameuserna%。\nちょっといい？": "..._USERNAME_PLACEHOLDER_XYZ123___.\nCan I talk to you for a minute?",
+    "……%usernameusernameuserna%。\nちょっといい？": "...%usernameusernameuserna%.\nCan I talk to you for a minute?",
     "少し、ふたりで話せないかな……？": "Can we talk for a bit...?"
 }
